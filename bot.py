@@ -36,7 +36,7 @@ INITIAL_BONUS_BALANCE = int(os.environ.get("INITIAL_BONUS_BALANCE", "3000"))
 if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
     raise ValueError("TELEGRAM_TOKEN yoki GEMINI_API_KEY kiritilmagan!")
 
-TEXT_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
+TEXT_MODELS = ["gemini-3.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"]
 EXECUTOR = ThreadPoolExecutor(max_workers=6)
 
 bot = Bot(token=TELEGRAM_TOKEN)
@@ -243,24 +243,52 @@ def fetch_topic_photo(queries, theme, idx, total, obj_path):
     odraw.polygon([(cx, cy - size + dy), (cx + size + dx, cy - dy), (cx, cy + size - dy), (cx - size - dx, cy + dy)], fill=(*c1, 240))
     obj.save(obj_path, "PNG")
 
-# 5. GEMINI AI (AQ. va AIza kalitlarini ?key= orqali yuboradi)
+# 5. GEMINI AI (HAM AQ. HAM AIzaSy KALITLARINI AVTOMATIK ULAYDI)
 def _send_gemini_request(model_name, payload):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={urllib.parse.quote(GEMINI_API_KEY)}"
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST"
-    )
-    with urllib.request.urlopen(req, timeout=50) as resp:
-        res_data = json.loads(resp.read().decode("utf-8"))
-        return res_data["candidates"][0]["content"]["parts"][0]["text"]
+    if GEMINI_API_KEY.startswith("AQ."):
+        endpoints = [
+            (
+                f"https://aiplatform.googleapis.com/v1/publishers/google/models/{model_name}:generateContent",
+                {"Content-Type": "application/json", "Authorization": f"Bearer {GEMINI_API_KEY}"}
+            ),
+            (
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent",
+                {"Content-Type": "application/json", "Authorization": f"Bearer {GEMINI_API_KEY}"}
+            ),
+            (
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={urllib.parse.quote(GEMINI_API_KEY)}",
+                {"Content-Type": "application/json"}
+            )
+        ]
+    else:
+        endpoints = [
+            (
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={urllib.parse.quote(GEMINI_API_KEY)}",
+                {"Content-Type": "application/json"}
+            )
+        ]
+
+    last_e = None
+    body_bytes = json.dumps(payload).encode("utf-8")
+    for url, hdrs in endpoints:
+        try:
+            req = urllib.request.Request(url, data=body_bytes, headers=hdrs, method="POST")
+            with urllib.request.urlopen(req, timeout=50) as resp:
+                res_data = json.loads(resp.read().decode("utf-8"))
+                return res_data["candidates"][0]["content"]["parts"][0]["text"]
+        except urllib.error.HTTPError as he:
+            err_body = he.read().decode("utf-8", errors="ignore")
+            print(f"API urinish xatosi ({url[:48]}...): {he.code} - {err_body[:200]}")
+            last_e = he
+        except Exception as e:
+            last_e = e
+    raise last_e or ValueError("Gemini API ulanmadi")
 
 def call_gemini(prompt, system_inst, temp=0.35):
     last_err = None
     payload = {
         "system_instruction": {"parts": [{"text": system_inst}]},
-        "contents": [{"parts": [{"text": prompt}]}],
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {
             "response_mime_type": "application/json",
             "temperature": temp
@@ -274,7 +302,7 @@ def call_gemini(prompt, system_inst, temp=0.35):
                 return json.loads(raw)
             except Exception as e:
                 last_err = e
-                time.sleep(0.7)
+                time.sleep(0.5)
     raise last_err or ValueError("AI javob bera olmadi.")
 
 def generate_presentation_data(author, subject, topic, count):
@@ -331,6 +359,7 @@ async def verify_receipt_with_ai(photo_bytes, claimed_amount):
         b64_img = base64.b64encode(photo_bytes).decode("utf-8")
         payload = {
             "contents": [{
+                "role": "user",
                 "parts": [
                     {"inline_data": {"mime_type": "image/jpeg", "data": b64_img}},
                     {"text": f"To'lov cheki tekshiruvi ({claimed_amount} so'm). JSON: {{\"note\": \"qisqa izoh\"}}"}
