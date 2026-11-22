@@ -1,0 +1,5 @@
+aiogram
+google-genai
+python-pptx
+reportlab
+pillow
