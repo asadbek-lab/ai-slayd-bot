@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from xml.sax.saxutils import escape
 from PIL import Image, ImageDraw, ImageFilter
+from aiohttp import web
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, FSInputFile
@@ -28,7 +29,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, 
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-# 1. SOZLAMALAR VA KALITLAR (Koyeb Environment Variables orqali olinadi)
+# 1. SOZLAMALAR VA KALITLAR (Environment Variables orqali olinadi)
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 ADMIN_CARD = os.environ.get("ADMIN_CARD", "8600 0000 0000 0000").strip()
@@ -681,9 +682,20 @@ async def pdf_img_finish(m: Message, state: FSMContext):
 async def cmd_help(m: Message):
     await m.answer("ℹ️ **Slayd yaratish** -> Ism -> Fan -> Mavzu -> Dizayn -> Slayd sonini tanlang!", parse_mode=ParseMode.MARKDOWN, reply_markup=main_menu)
 
+async def handle_ping(request):
+    return web.Response(text="AI SLAYD PRO ishlayapti!")
+
 async def main():
+    app = web.Application()
+    app.router.add_get("/", handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
     await bot.delete_webhook(drop_pending_updates=True)
-    print("🚀 AI SLAYD PRO 24/7 REJIMDA ISHGA TUSHDI!")
+    print(f"🚀 AI SLAYD PRO {port}-PORTDA VA 24/7 REJIMDA ISHGA TUSHDI!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
