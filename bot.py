@@ -1,4 +1,4 @@
-import time, math, sqlite3, asyncio, json, os, re, tempfile, io, urllib.request, urllib.parse
+import time, math, sqlite3, asyncio, json, os, re, tempfile, io, base64, urllib.request, urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from xml.sax.saxutils import escape
@@ -11,9 +11,6 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.enums import ParseMode
-
-from google import genai
-from google.genai import types
 
 from pptx import Presentation
 from pptx.util import Inches, Pt
@@ -34,12 +31,11 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 ADMIN_CARD = os.environ.get("ADMIN_CARD", "8600 0000 0000 0000").strip()
 ADMIN_OWNER = os.environ.get("ADMIN_OWNER", "Admin").strip()
-INITIAL_BONUS_BALANCE = int(os.environ.get("INITIAL_BONUS_BALANCE", "50000"))
+INITIAL_BONUS_BALANCE = int(os.environ.get("INITIAL_BONUS_BALANCE", "3000"))
 
 if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
     raise ValueError("TELEGRAM_TOKEN yoki GEMINI_API_KEY kiritilmagan!")
 
-client = genai.Client(api_key=GEMINI_API_KEY)
 TEXT_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
 EXECUTOR = ThreadPoolExecutor(max_workers=6)
 
@@ -247,17 +243,40 @@ def fetch_topic_photo(queries, theme, idx, total, obj_path):
     odraw.polygon([(cx, cy - size + dy), (cx + size + dx, cy - dy), (cx, cy + size - dy), (cx - size - dx, cy + dy)], fill=(*c1, 240))
     obj.save(obj_path, "PNG")
 
-# 5. GEMINI AI
+# 5. GEMINI AI (AQ. va AIza kalitlarini qo'llab-quvvatlaydi)
+def _send_gemini_request(model_name, payload):
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+    headers = {"Content-Type": "application/json"}
+    if GEMINI_API_KEY.startswith("AQ."):
+        headers["Authorization"] = f"Bearer {GEMINI_API_KEY}"
+    else:
+        url += f"?key={urllib.parse.quote(GEMINI_API_KEY)}"
+
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+        method="POST"
+    )
+    with urllib.request.urlopen(req, timeout=50) as resp:
+        res_data = json.loads(resp.read().decode("utf-8"))
+        return res_data["candidates"][0]["content"]["parts"][0]["text"]
+
 def call_gemini(prompt, system_inst, temp=0.35):
     last_err = None
+    payload = {
+        "system_instruction": {"parts": [{"text": system_inst}]},
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "response_mime_type": "application/json",
+            "temperature": temp
+        }
+    }
     for m in TEXT_MODELS:
         for _ in range(2):
             try:
-                res = client.models.generate_content(
-                    model=m, contents=prompt,
-                    config=types.GenerateContentConfig(system_instruction=system_inst, response_mime_type="application/json", temperature=temp)
-                )
-                raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", (res.text or "").strip())
+                text_out = _send_gemini_request(m, payload)
+                raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", (text_out or "").strip())
                 return json.loads(raw)
             except Exception as e:
                 last_err = e
@@ -315,13 +334,18 @@ def generate_crossword_data(topic):
 
 async def verify_receipt_with_ai(photo_bytes, claimed_amount):
     try:
-        img = Image.open(io.BytesIO(photo_bytes))
-        res = await asyncio.to_thread(
-            client.models.generate_content, model=TEXT_MODELS[0],
-            contents=[img, f"To'lov cheki tekshiruvi ({claimed_amount} so'm). JSON: {{\"note\": \"qisqa izoh\"}}"],
-            config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.1)
-        )
-        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", (res.text or "").strip())
+        b64_img = base64.b64encode(photo_bytes).decode("utf-8")
+        payload = {
+            "contents": [{
+                "parts": [
+                    {"inline_data": {"mime_type": "image/jpeg", "data": b64_img}},
+                    {"text": f"To'lov cheki tekshiruvi ({claimed_amount} so'm). JSON: {{\"note\": \"qisqa izoh\"}}"}
+                ]
+            }],
+            "generationConfig": {"response_mime_type": "application/json", "temperature": 0.1}
+        }
+        text_out = await asyncio.to_thread(_send_gemini_request, TEXT_MODELS[0], payload)
+        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", (text_out or "").strip())
         return json.loads(raw)
     except Exception:
         return {"note": "Chek qabul qilindi"}
