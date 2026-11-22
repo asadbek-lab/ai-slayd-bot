@@ -243,19 +243,13 @@ def fetch_topic_photo(queries, theme, idx, total, obj_path):
     odraw.polygon([(cx, cy - size + dy), (cx + size + dx, cy - dy), (cx, cy + size - dy), (cx - size - dx, cy + dy)], fill=(*c1, 240))
     obj.save(obj_path, "PNG")
 
-# 5. GEMINI AI (AQ. va AIza kalitlarini qo'llab-quvvatlaydi)
+# 5. GEMINI AI (AQ. va AIza kalitlarini ?key= orqali yuboradi)
 def _send_gemini_request(model_name, payload):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
-    headers = {"Content-Type": "application/json"}
-    if GEMINI_API_KEY.startswith("AQ."):
-        headers["Authorization"] = f"Bearer {GEMINI_API_KEY}"
-    else:
-        url += f"?key={urllib.parse.quote(GEMINI_API_KEY)}"
-
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={urllib.parse.quote(GEMINI_API_KEY)}"
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
-        headers=headers,
+        headers={"Content-Type": "application/json"},
         method="POST"
     )
     with urllib.request.urlopen(req, timeout=50) as resp:
