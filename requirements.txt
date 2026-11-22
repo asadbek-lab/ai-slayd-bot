@@ -3,3 +3,4 @@ google-genai
 python-pptx
 reportlab
 pillow
+aiohttp
